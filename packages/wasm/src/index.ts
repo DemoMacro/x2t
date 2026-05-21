@@ -135,14 +135,33 @@ export interface X2tOptions {
 export interface ConvertOptions {
   /** Input file data */
   input: Buffer | Uint8Array;
-  /** Input format */
+  /** Input format (inferred from extension if not set with formatFrom) */
   inputFormat: Format;
-  /** Output format */
+  /** Output format (inferred from extension if not set with formatTo) */
   outputFormat: Format;
-  /** CSV/TXT encoding code (optional) */
+  /** Explicitly set m_nFormatFrom in XML (overrides extension inference) */
+  formatFrom?: number;
+  /** Explicitly set m_nFormatTo in XML (overrides extension inference) */
+  formatTo?: number;
+  /** CSV/TXT encoding code (m_nCsvTxtEncoding) */
   csvTxtEncoding?: number;
-  /** CSV delimiter code (optional) */
+  /** CSV delimiter code (m_nCsvDelimiter) */
   csvDelimiter?: number;
+  /** Whether to disable base64 encoding (m_bIsNoBase64), default false */
+  noBase64?: boolean;
+  /** Media files to write into /working/media/ (e.g. images from bin) */
+  media?: Record<string, Uint8Array>;
+  /** Font files to write into /working/fonts/ */
+  fonts?: Record<string, Uint8Array>;
+  /** Theme files to write into /working/themes/ */
+  themes?: Record<string, Uint8Array>;
+}
+
+export interface ConvertResult {
+  /** Converted output data */
+  output: Uint8Array;
+  /** Media files read from /working/media/ after conversion */
+  media: Record<string, Uint8Array>;
 }
 
 export interface X2tModule {
@@ -301,8 +320,12 @@ export function buildXmlConfig(options: {
   inputPath: string;
   outputPath: string;
   fontDir?: string;
+  themeDir?: string;
+  formatFrom?: number;
+  formatTo?: number;
   csvTxtEncoding?: number;
   csvDelimiter?: number;
+  noBase64?: boolean;
 }): string {
   const lines: string[] = ['<?xml version="1.0" encoding="utf-8"?>', "<TaskQueueDataConvert>"];
 
@@ -312,12 +335,23 @@ export function buildXmlConfig(options: {
   if (options.fontDir) {
     lines.push(`<m_sFontDir>${escapeXml(options.fontDir)}</m_sFontDir>`);
   }
-
+  if (options.themeDir) {
+    lines.push(`<m_sThemeDir>${escapeXml(options.themeDir)}</m_sThemeDir>`);
+  }
+  if (options.formatFrom !== undefined) {
+    lines.push(`<m_nFormatFrom>${options.formatFrom}</m_nFormatFrom>`);
+  }
+  if (options.formatTo !== undefined) {
+    lines.push(`<m_nFormatTo>${options.formatTo}</m_nFormatTo>`);
+  }
   if (options.csvTxtEncoding !== undefined) {
     lines.push(`<m_nCsvTxtEncoding>${options.csvTxtEncoding}</m_nCsvTxtEncoding>`);
   }
   if (options.csvDelimiter !== undefined) {
     lines.push(`<m_nCsvDelimiter>${options.csvDelimiter}</m_nCsvDelimiter>`);
+  }
+  if (options.noBase64 !== undefined) {
+    lines.push(`<m_bIsNoBase64>${options.noBase64 ? 1 : 0}</m_bIsNoBase64>`);
   }
 
   lines.push("</TaskQueueDataConvert>");
@@ -420,7 +454,7 @@ export class X2tConverter {
     return new X2tConverter(mod, options.fontDir);
   }
 
-  convert(options: ConvertOptions): Uint8Array {
+  convert(options: ConvertOptions): ConvertResult {
     const inputExt = formatToExt(options.inputFormat);
     const outputExt = formatToExt(options.outputFormat);
     const inputPath = `${WORK_DIR}/input.${inputExt}`;
@@ -428,19 +462,46 @@ export class X2tConverter {
     const configPath = `${WORK_DIR}/config.xml`;
 
     try {
-      // Ensure working directory exists
-      this.mod.FS.mkdirTree(WORK_DIR);
+      // Ensure working directories exist
+      this.mod.FS.mkdirTree(`${WORK_DIR}/media`);
+      this.mod.FS.mkdirTree(`${WORK_DIR}/fonts`);
+      this.mod.FS.mkdirTree(`${WORK_DIR}/themes`);
 
       // Write input file
       this.mod.FS.writeFile(inputPath, new Uint8Array(options.input));
+
+      // Write media files
+      if (options.media) {
+        for (const [name, data] of Object.entries(options.media)) {
+          this.mod.FS.writeFile(`${WORK_DIR}/media/${name}`, data);
+        }
+      }
+
+      // Write font files
+      if (options.fonts) {
+        for (const [name, data] of Object.entries(options.fonts)) {
+          this.mod.FS.writeFile(`${WORK_DIR}/fonts/${name}`, data);
+        }
+      }
+
+      // Write theme files
+      if (options.themes) {
+        for (const [name, data] of Object.entries(options.themes)) {
+          this.mod.FS.writeFile(`${WORK_DIR}/themes/${name}`, data);
+        }
+      }
 
       // Write XML config
       const xml = buildXmlConfig({
         inputPath,
         outputPath,
-        fontDir: this.fontDir,
+        fontDir: this.fontDir ?? `${WORK_DIR}/fonts/`,
+        themeDir: `${WORK_DIR}/themes`,
+        formatFrom: options.formatFrom,
+        formatTo: options.formatTo,
         csvTxtEncoding: options.csvTxtEncoding,
         csvDelimiter: options.csvDelimiter,
+        noBase64: options.noBase64,
       });
       this.mod.FS.writeFile(configPath, xml);
 
@@ -451,7 +512,21 @@ export class X2tConverter {
       }
 
       // Read output
-      return this.mod.FS.readFile(outputPath);
+      const output = this.mod.FS.readFile(outputPath);
+
+      // Read output media files
+      const media: Record<string, Uint8Array> = {};
+      try {
+        const entries = this.mod.FS.readdir(`${WORK_DIR}/media`);
+        for (const entry of entries) {
+          if (entry === "." || entry === "..") continue;
+          media[`media/${entry}`] = this.mod.FS.readFile(`${WORK_DIR}/media/${entry}`);
+        }
+      } catch {
+        // Media directory may be empty or removed
+      }
+
+      return { output, media };
     } finally {
       cleanupDir(this.mod, WORK_DIR);
     }

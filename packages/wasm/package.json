@@ -1,8 +1,23 @@
 {
   "name": "@x2t/wasm",
-  "version": "0.0.1",
-  "description": "",
-  "keywords": [],
+  "version": "0.1.0",
+  "description": "WASM-based document format converter powered by OnlyOffice x2t",
+  "keywords": [
+    "converter",
+    "csv",
+    "document",
+    "docx",
+    "odp",
+    "ods",
+    "odt",
+    "onlyoffice",
+    "pptx",
+    "rtf",
+    "txt",
+    "wasm",
+    "x2t",
+    "xlsx"
+  ],
   "homepage": "https://github.com/DemoMacro/x2t#readme",
   "bugs": {
     "url": "https://github.com/DemoMacro/x2t/issues"
